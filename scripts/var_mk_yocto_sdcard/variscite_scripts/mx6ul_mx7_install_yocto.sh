@@ -283,10 +283,10 @@ usage()
 	echo " Usage: $0 OPTIONS"
 	echo
 	echo " OPTIONS:"
-	echo " -b <mx6ul|mx6ul5g|mx6ull|mx6ull5g|mx7>	Board model (DART-6UL/DART-6UL-5G/DART-6ULL/DART-6ULL-5G/VAR-SOM-MX7) - optional, autodetected if not provided."
+	echo " -b <dart6ul|som6ul|mx7>  Board model (DART-6UL/VAR-SOM-6UL/VAR-SOM-MX7) - optional, autodetected if not provided."
 	echo " -r <nand|emmc>		storage device (NAND flash/eMMC) - optional, autodetected if not provided."
-	echo " -v <wifi|sd>		DART-6UL Variant (WiFi/SD card) - mandatory in case of DART-6UL with NAND flash; ignored otherwise."
-	echo " -m			VAR-SOM-MX7 optional Cortex-M4 support; ignored in case of DART-6UL."
+	echo " -v <wifi|sd>		DART-6UL/VAR-SOM-6UL mmc0 device (WiFi/SD card) - mandatory in case of 6UL with NAND flash; ignored otherwise."
+	echo " -m			VAR-SOM-MX7 optional Cortex-M4 support; ignored in case of 6UL."
 	echo " -u			create two rootfs partitions (for swUpdate double-copy) - ignored in case of NAND storage device."
 	echo
 }
@@ -299,7 +299,7 @@ finish()
 }
 
 
-blue_underlined_bold_echo "*** Variscite MX6UL/MX6ULL/MX7 Yocto eMMC/NAND Recovery ***"
+blue_underlined_bold_echo "*** Variscite MX6UL/MX6ULL/MX6ULZ/MX7 Yocto eMMC/NAND Recovery ***"
 echo
 
 VARSOMMX7_VARIANT=""
@@ -307,13 +307,10 @@ swupdate=0
 
 SOC=`cat /sys/bus/soc/devices/soc0/soc_id`
 if [[ $SOC == i.MX6UL* ]] ; then
-	BOARD=mx6ul
-	if [[ $SOC == i.MX6ULL ]] ; then
-		BOARD+=l
-	fi
-	SOM_INFO=`i2cget -y 1 0x51 0xfd`
-	if [[ $(($(($SOM_INFO >> 3)) & 0x3)) == 1 ]] ; then
-		BOARD+=5g
+	if grep -iq DART /sys/devices/soc0/machine ; then
+		BOARD=dart6ul
+	else
+		BOARD=som6ul
 	fi
 
 	if [[ -d /sys/bus/platform/devices/1806000.gpmi-nand ]] ; then
@@ -341,7 +338,7 @@ do
 		STORAGE_DEV=$OPTARG
 		;;
 	v)
-		DART6UL_VARIANT=$OPTARG
+		MX6UL_MMC0_DEV=$OPTARG
 		;;
 	m)
 		VARSOMMX7_VARIANT=-m4
@@ -358,14 +355,10 @@ done
 
 STR=""
 
-if [[ $BOARD == "mx6ul" ]] ; then
-	STR="DART-6UL (i.MX6UL)"
-elif [[ $BOARD == "mx6ull" ]] ; then
-	STR="DART-6UL (i.MX6ULL)"
-elif [[ $BOARD == "mx6ul5g" ]] ; then
-	STR="DART-6UL-5G (i.MX6UL)"
-elif [[ $BOARD == "mx6ull5g" ]] ; then
-	STR="DART-6UL-5G (i.MX6ULL)"
+if [[ $BOARD == "dart6ul" ]] ; then
+	STR="DART-6UL ($SOC)"
+elif [[ $BOARD == "som6ul" ]] ; then
+	STR="VAR-SOM-6UL ($SOC)"
 elif [[ $BOARD == "mx7" ]] ; then
 	STR="VAR-SOM-MX7"
 else
@@ -395,11 +388,11 @@ fi
 printf "Installing to internal storage device: "
 blue_bold_echo $STR
 
-if [[ $BOARD == mx6ul* ]] ; then
+if [[ $BOARD == *6ul ]] ; then
 	if [[ $STORAGE_DEV == "nand" ]] ; then
-		if [[ $DART6UL_VARIANT == "wifi" ]] ; then
+		if [[ $MX6UL_MMC0_DEV == "wifi" ]] ; then
 			STR="WiFi (no SD card)"
-		elif [[ $DART6UL_VARIANT == "sd" ]] ; then
+		elif [[ $MX6UL_MMC0_DEV == "sd" ]] ; then
 			STR="SD card (no WiFi)"
 		else
 			usage
@@ -408,40 +401,36 @@ if [[ $BOARD == mx6ul* ]] ; then
 		printf "With support for:  "
 		blue_bold_echo "$STR"
 	fi
+
+	if [[ $SOC == i.MX6UL ]] ; then
+		soc="imx6ul"
+	elif [[ $SOC == i.MX6ULL ]] ; then
+		soc="imx6ull"
+	elif [[ $SOC == i.MX6ULZ ]] ; then
+		soc="imx6ulz"
+	fi
+	if [[ $BOARD == "dart6ul" ]] ; then
+		som="var-dart"
+		carrier="6ulcustomboard"
+	elif [[ $BOARD == "som6ul" ]] ; then
+		som="var-som"
+		carrier="concerto-board"
+	fi
+	if [[ $MX6UL_MMC0_DEV == "sd" ]] ; then
+		mx6ul_mmc0_dev="sd-card"
+	elif [[ $MX6UL_MMC0_DEV == "wifi" ]] ; then
+		mx6ul_mmc0_dev="wifi"
+	fi
 fi
 
 if [[ $STORAGE_DEV == "nand" ]] ; then
 	SPL_IMAGE=SPL-nand
 	UBOOT_IMAGE=u-boot.img-nand
 
-	if [[ $BOARD == mx6ul* ]] ; then
-		if [[ $BOARD == "mx6ul" ]] ; then
-			if [[ $DART6UL_VARIANT == "wifi" ]] ; then
-				KERNEL_DTB=imx6ul-var-dart-nand_wifi.dtb
-			elif [[ $DART6UL_VARIANT == "sd" ]] ; then
-				KERNEL_DTB=imx6ul-var-dart-sd_nand.dtb
-			fi
-		elif [[ $BOARD == "mx6ull" ]] ; then
-			if [[ $DART6UL_VARIANT == "wifi" ]] ; then
-				KERNEL_DTB=imx6ull-var-dart-nand_wifi.dtb
-			elif [[ $DART6UL_VARIANT == "sd" ]] ; then
-				KERNEL_DTB=imx6ull-var-dart-sd_nand.dtb
-			fi
-		elif [[ $BOARD == "mx6ul5g" ]] ; then
-			if [[ $DART6UL_VARIANT == "wifi" ]] ; then
-				KERNEL_DTB=imx6ul-var-dart-5g-nand_wifi.dtb
-			elif [[ $DART6UL_VARIANT == "sd" ]] ; then
-				KERNEL_DTB=imx6ul-var-dart-sd_nand.dtb
-			fi
-		elif [[ $BOARD == "mx6ull5g" ]] ; then
-			if [[ $DART6UL_VARIANT == "wifi" ]] ; then
-				KERNEL_DTB=imx6ull-var-dart-5g-nand_wifi.dtb
-			elif [[ $DART6UL_VARIANT == "sd" ]] ; then
-				KERNEL_DTB=imx6ull-var-dart-sd_nand.dtb
-			fi
-		fi
+	if [[ $BOARD == *6ul ]] ; then
+		KERNEL_DTB="${soc}-${som}-${carrier}-${STORAGE_DEV}-${mx6ul_mmc0_dev}.dtb"
 	elif [[ $BOARD == "mx7" ]] ; then
-		KERNEL_DTB=imx7d-var-som-nand${VARSOMMX7_VARIANT}.dtb
+		KERNEL_DTB="imx7d-var-som-nand${VARSOMMX7_VARIANT}.dtb"
 	fi
 
 	printf "Installing Device Tree file: "
@@ -468,22 +457,13 @@ elif [[ $STORAGE_DEV == "emmc" ]] ; then
 	SPL_IMAGE=SPL-sd
 	UBOOT_IMAGE=u-boot.img-sd
 
-	if [[ $BOARD == mx6ul* ]] ; then
+	if [[ $BOARD == *6ul ]] ; then
 		block=mmcblk1
-		if [[ $BOARD == "mx6ul" || $BOARD == "mx6ul5g" ]] ; then
-			KERNEL_DTBS="imx6ul-var-dart-emmc_wifi.dtb
-				     imx6ul-var-dart-5g-emmc_wifi.dtb
-				     imx6ul-var-dart-sd_emmc.dtb"
-			FAT_VOLNAME=BOOT-VAR6UL
-		elif [[ $BOARD == "mx6ull" || $BOARD == "mx6ull5g" ]] ; then
-			KERNEL_DTBS="imx6ull-var-dart-emmc_wifi.dtb
-				     imx6ull-var-dart-5g-emmc_wifi.dtb
-				     imx6ull-var-dart-sd_emmc.dtb"
-			FAT_VOLNAME=BOOT-VAR6ULL
-		fi
+		KERNEL_DTBS="${soc}-${som}-${carrier}-${STORAGE_DEV}-*.dtb"
+		FAT_VOLNAME=BOOT-VAR6UL
 	elif [[ $BOARD == "mx7" ]] ; then
 		block=mmcblk2
-		KERNEL_DTBS=imx7d-var-som-emmc*.dtb
+		KERNEL_DTBS="imx7d-var-som-emmc*.dtb"
 		FAT_VOLNAME=BOOT-VARMX7
 	fi
 	node=/dev/${block}
